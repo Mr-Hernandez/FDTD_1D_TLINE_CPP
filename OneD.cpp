@@ -101,5 +101,5 @@ double Vgourd(int n, double dt){
 
     if(t < 0){ Vsauce = 0;}
     else if(t >= 0 && t <= t_rise){ Vsauce = 2*(t / t_rise);
-
+    //write more stufffffffff
 }
