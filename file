@@ -1,0 +1,1 @@
+gnuplot -p -e "plot 'V.txt'; set style data linespoints" loop.plt &
