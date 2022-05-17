@@ -5,8 +5,20 @@
 #include <sys/wait.h>
 #include <sys/types.h>
 #include <signal.h>
-#include <string.h>
+
+// for exec() and NewPID()
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <array>
+#include <vector>
+#include <sstream>
+#include <algorithm>
+#include <iterator>
+
 /*
+ *
+ *
  * What's Next?
  * 1. calls to gnuplot updating each iterations
  * 2. Either output file of V and I or feed directly to gnuplot call
@@ -65,6 +77,8 @@ void init_coeff(coeff_t& coeff, details_t& details);
 void iupdate(double I[], double V[], details_t& details, coeff_t& coeff);
 void CreateFile(double V[], double I[], details_t& details);
 void plot(double P[]);
+std::string exec(const char* cmd);
+int NewPID();
 
 int main(){
     details_t details;
@@ -127,8 +141,15 @@ int main(){
 //	system(cmdx.c_str());
        // killpg(pid, SIGKILL);
        //system("kill gnuplot");
-       int G = kill(pid + 2, SIGTERM);
-       std::cout << "G is " << G << std::endl;
+       //int G = kill(pid + 2, SIGTERM);
+       //std::cout << "G is " << G << std::endl;
+	int K = NewPID();
+	if(K > 0){
+		std::cout << "killerPID is: " << K << std::endl;
+		std::string cmd = "kill " + std::to_string(K);
+		system(cmd.c_str());
+	}
+	
     }
     if(pid == 0){
         std::cout << "child process x: " << getpid() << std::endl;
@@ -250,4 +271,45 @@ void plot(double P[]){
    // system("gnuplot -p -e \"set style data linepoints\"\"plot 'V.txt'\""); 
    // gnuplot -p -e "plot 'V.txt'" -e "set style data linepoints"
    
+}
+
+std::string exec(const char* cmd){
+	std::array<char, 128> buffer;
+	std::string result;
+	std::shared_ptr<FILE> pipe(popen(cmd, "r"), pclose);
+	while(!feof(pipe.get())){
+		if(fgets(buffer.data(), 128, pipe.get()) != nullptr)
+			result += buffer.data();
+	}
+	return result;
+}
+
+int NewPID(){
+	std::string read = exec("ps aux");
+	std::cout << read << std::endl;
+
+	std::stringstream check1(read);
+	std::string tmp;
+	std::vector <std::string> tokens;
+	
+	while(getline(check1,tmp, '\n'))
+	{
+		std::stringstream check2(tmp);
+		std::string tmp2;
+		copy(std::istream_iterator<std::string>(check2),
+		     std::istream_iterator<std::string>(),
+		     std::back_inserter(tokens));
+		
+		for(int i = 0; i < tokens.size(); i++){
+			std::cout << i << tokens[i] << std::endl;
+			if(tokens[i] == "gnuplot"){
+				std::cout << "Winner: " << tokens[1] << std::endl;
+				int T = std::stoi(tokens[1]);
+				std::cout << "Token 1 as int is: " << T << std::endl;
+				return T;
+			}
+		}
+		tokens.clear();
+	}
+	return 0;
 }
