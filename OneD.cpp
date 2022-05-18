@@ -116,7 +116,7 @@ int main(){
 //	while(std::cin.get() != '\n');
 	// file creation for V and I here
         CreateFile(V, I, details);
-        system("sleep 0.2");
+        system("sleep 0.01");
 	// gnuplot call here
 	//plot(V);
     }
@@ -182,13 +182,16 @@ double Vgourd(int n, double dt){
 
     double t = (n-0.5)*dt;
     double Vsauce;
-    if(t < 0){ Vsauce = 0;}
-    else if(t >= 0 && t <= t_rise){ Vsauce = 2*(t / t_rise);}
-    else if(t >= t_rise && t <= t_rise + t_peak){ Vsauce = 2;}
-    else if(t >= t_rise + t_peak && t <= t_rise + t_peak + t_fall){
-	    Vsauce = 2*(t_rise + t_peak + t_fall - t) / t_fall;}
-	    
+    if(t < 0)
+    	{ Vsauce = 0;}
+    else if(t >= 0 && t <= t_rise)
+    	{ Vsauce = 2*(t / t_rise);}
+    else if(t >= t_rise && t <= t_rise + t_peak)
+    	{ Vsauce = 2;}
+    else if(t >= t_rise + t_peak && t <= t_rise + t_peak + t_fall)
+    	{ Vsauce = 2*(t_rise + t_peak + t_fall - t) / t_fall;}
     else {Vsauce = 0;}
+    std::cout << "Vsauce at n:" << n << " = " << Vsauce << std::endl;
     return Vsauce;
 }
 
@@ -209,7 +212,7 @@ void init_parameters(details_t& details){
     details.C = 100*pow(10,-12); // F/m
     details.L = 250*pow(10,-9); // H/m
     details.d = 0.5; // m
-    details.ncells = 20;
+    details.ncells = 100;
     details.cfln = 1;
     details.simtime = 5*pow(10,-9);
     details.Rs = 50;  // Source Resistance
@@ -243,8 +246,8 @@ void init_coeff(coeff_t& coeff, details_t& details){
 
 void CreateFile(double V[], double I[], details_t& details){
     std::ofstream out1, out2;
-    out1.open("V.txt", std::ofstream::out | std::ofstream::trunc);
-    out2.open("I.txt", std::ofstream::out | std::ofstream::trunc);
+    out1.open("V2.txt", std::ofstream::out | std::ofstream::trunc);
+    out2.open("I2.txt", std::ofstream::out | std::ofstream::trunc);
 
     for(int k = 0; k < details.nx; k++){
    	out1 << k+1 << "\t" << V[k] << "\n";
@@ -256,6 +259,12 @@ void CreateFile(double V[], double I[], details_t& details){
 
     out1.close();
     out2.close();
+
+    remove("V.txt");
+    remove("I.txt");
+    rename("V2.txt", "V.txt");
+    rename("I2.txt", "I.txt");
+    
 }
 
 void plot(double P[]){
