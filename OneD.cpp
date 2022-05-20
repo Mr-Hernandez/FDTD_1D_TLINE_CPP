@@ -2,17 +2,23 @@
 #include <math.h>
 #include <fstream>
 #include <unistd.h>
-#include <signal.h>
+//#include <signal.h>
 
 // for exec() and NewPID()
 #include <memory>
 #include <stdexcept>
-#include <string>
+#include <string.h>
 #include <array>
 #include <vector>
 #include <sstream>
 #include <algorithm>
 #include <iterator>
+
+//for new replot method
+#include <sys/types.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/wait.h>
 
 /*
  * Try using refresh and replot  and volatile instead of reread.
@@ -73,34 +79,91 @@ int main(){
 
     double V[details.nx] = {0};
     double I[details.nx-1] = {0};
-    pid_t pid = fork();
+    CreateFile(V, I, details);
+    // additions
+    int pipefd[2];
+    pid_t pid;
+    char buf;
+    //char msg = 'O';
+    char msg[]{"O"};
+    pipe(pipefd);
+    pid = fork();
+    
+
     if(pid == 0){ 
-	    //plot(V);
-        CreateFile(V, I, details);
-        plot2(V);
-	    std::cout << "child id: " <<  pid << std::endl;
-       	std::cout << "child get: " << getpid() << std::endl; 
+        close(pipefd[1]);
+        FILE* gnuPipe = popen("gnuplot -persist", "w");
+        fflush(gnuPipe);
+        fprintf(gnuPipe, "plot 'V.txt'\n");
+        fflush(gnuPipe);
+        while (read(pipefd[0], &buf, 1) > 0){
+               if(buf == 'G'){break;}
+        }
+        while (read(pipefd[0], &buf, 1) > 0) // read while EOF
+        {     
+           if(buf == 'D'){
+               std::cout << "Got D" << std::endl;
+           }else if(buf == 'E'){
+               std::cout << "Got E" << std::endl;
+               fprintf(gnuPipe, "set yrange [-2:2]\n");
+               fprintf(gnuPipe, "set title \"Cave of Wonder\"\n");
+               fprintf(gnuPipe, "replot\n");
+               fflush(gnuPipe);
+           }else if(buf == 'X'){
+               std::cout << "Got X" << std::endl;
+               break;
+           }else{
+               std::cout << "garbage: " << buf << std::endl;
+           }
+           
+		}
+           
+	   std::cout << "Closing cuz X" << std::endl; 
+           //write(1, "\n", 1);
+           close(pipefd[0]); // close the read-end of the pipe
+           exit(EXIT_SUCCESS);
     }
-    else if(pid > 0){
+    else{
 	    std::cout << "parent id: " << pid << std::endl;
         std::cout << "parent get: " << getpid() << std::endl; 
-        //plot2(V);
-    for (int i = 0; i < details.nt-1; i++){
-        Vupdate(V, I, details, coeff);
-        VsUpdate(V, I, i, details, coeff);
-        Vlupdate(V, I, details, coeff);
-        iupdate(I, V, details, coeff);
-        for (int i = 0; i < details.nx; i++){
-           // std::cout << "V[" << i << "] = " << V[i] << std::endl;
-        }	
+        close(pipefd[0]); // close the read-end of the pipe, I'm not going to use it
+       std::cout << "enter G:"; std::cin >> msg;
+	   write(pipefd[1], &msg, strlen(msg)); // send the content of argv[1] to the reader
+	   char INPUT[] = "DE";
+       msg[0] = 'E';
+       for (int i = 0; i < details.nt-1; i++){
+            Vupdate(V, I, details, coeff);
+            VsUpdate(V, I, i, details, coeff);
+            Vlupdate(V, I, details, coeff);
+            iupdate(I, V, details, coeff);
+            //std::cout << "At i = " << i << std::endl;
+        // file creation for V and I here
+            CreateFile(V, I, details);
+            //msg = 'E';
+		    write(pipefd[1], &msg, strlen(msg)); // send the content of argv[1] to the reader
+            /*if(i != 88){
+		    write(pipefd[1], &msg, strlen(&msg)); // send the content of argv[1] to the reader
+            }else{
+                i = 89;
+		        write(pipefd[1], &msg, strlen(&msg)); // send the content of argv[1] to the reader
+                i = 88;
+            }*/
 
-	// file creation for V and I here
-        CreateFile(V, I, details);
-        replot(V);
-        system("sleep 0.01");
-        // gnuplot call here
-        //plot(V);
-    }
+            system("sleep 0.01");
+        } 
+       //size_t BB = strlen(&msg);
+       //std::cout << BB << " is BB" << std::endl;
+	   std::cout << "enter to end:"; std::cin >> msg;
+       std::cout << "clsing pipefd[1] now" << std::endl;
+	   close(pipefd[1]); // close the write-end of the pipe, thus sending EOF to the reader
+           wait(NULL); // wait for the child process to exit before I do the same
+           exit(EXIT_SUCCESS);
+       }
+    return 0;
+}
+/*
+// old
+    
         for (int i = 0; i < details.nx; i++){
            // std::cout << "V[" << i << "] = " << V[i] << std::endl;
         }
@@ -121,7 +184,7 @@ int main(){
     }
     std::cout << "who done it: " << getpid() << std::endl;
     return 0; 
-}
+}*/
 
 void Vupdate(double V[], double I[], details_t& details, coeff_t& coeff){
     for(int k = 1; k < details.nx-1; k++){
@@ -214,8 +277,8 @@ void init_coeff(coeff_t& coeff, details_t& details){
 
 void CreateFile(double V[], double I[], details_t& details){
     std::ofstream out1, out2;
-    out1.open("V2.txt", std::ofstream::out | std::ofstream::trunc);
-    out2.open("I2.txt", std::ofstream::out | std::ofstream::trunc);
+    out1.open("V.txt", std::ofstream::out | std::ofstream::trunc);
+    out2.open("I.txt", std::ofstream::out | std::ofstream::trunc);
 
 
     for(int k = 0; k < details.nx; k++){
@@ -229,11 +292,6 @@ void CreateFile(double V[], double I[], details_t& details){
     out1.close();
     out2.close();
 
-    remove("V.txt");
-    remove("I.txt");
-    rename("V2.txt", "V.txt");
-    rename("I2.txt", "I.txt");
-    
 }
 
 
