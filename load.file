@@ -1,0 +1,1 @@
+gnuplot -p -e "load 'file2'"

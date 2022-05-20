@@ -2,8 +2,6 @@
 #include <math.h>
 #include <fstream>
 #include <unistd.h>
-#include <sys/wait.h>
-#include <sys/types.h>
 #include <signal.h>
 
 // for exec() and NewPID()
@@ -17,26 +15,9 @@
 #include <iterator>
 
 /*
- *
- *
- * What's Next?
- * 1. calls to gnuplot updating each iterations
- * 2. Either output file of V and I or feed directly to gnuplot call
- * 3. Consider single file creation vs multi file creation
- *   a. can gnuplot take only part of a file?
- *   stackoverflow.com/questions/36926994/how-to-plot-specific-subset-of-data-from-a-data-file-with-gnuplot 
- * 4. Make list of commands, perhaps create a header for gnuplot use
- * 5. 
- * 
- * issues to fix
- * 1. output file is appending rather than clearing and rewriting
- * 2. will gnuplot keep resizing as V and I change? 
- * Next
- * 1. automate child pid retrieval to kill process
- * 2. set auto timer for the for loop
- * 3. fix equations
- * 4. possibly make gif. 5. Consider this
- *		 */
+ * Try using refresh and replot  and volatile instead of reread.
+ */
+
 
 typedef struct{ 
     double C;
@@ -79,6 +60,9 @@ void CreateFile(double V[], double I[], details_t& details);
 void plot(double P[]);
 std::string exec(const char* cmd);
 int NewPID();
+void plot2(double P[]);
+void replot(double P[]);
+
 
 int main(){
     details_t details;
@@ -91,70 +75,49 @@ int main(){
     double I[details.nx-1] = {0};
     pid_t pid = fork();
     if(pid == 0){ 
-	    plot(V);
+	    //plot(V);
+        CreateFile(V, I, details);
+        plot2(V);
 	    std::cout << "child id: " <<  pid << std::endl;
-       	    std::cout << "child get: " << getpid() << std::endl; 
+       	std::cout << "child get: " << getpid() << std::endl; 
     }
     else if(pid > 0){
 	    std::cout << "parent id: " << pid << std::endl;
-            std::cout << "parent get: " << getpid() << std::endl; 
-    //plot(V); 
-
-    int count = 0;
+        std::cout << "parent get: " << getpid() << std::endl; 
+        //plot2(V);
     for (int i = 0; i < details.nt-1; i++){
-	// do stuff here
-	count++;
-	Vupdate(V, I, details, coeff);
-	VsUpdate(V, I, i, details, coeff);
-	Vlupdate(V, I, details, coeff);
-	iupdate(I, V, details, coeff);
+        Vupdate(V, I, details, coeff);
+        VsUpdate(V, I, i, details, coeff);
+        Vlupdate(V, I, details, coeff);
+        iupdate(I, V, details, coeff);
         for (int i = 0; i < details.nx; i++){
-		std::cout << "V[" << i << "] = " << V[i] << std::endl;
+           // std::cout << "V[" << i << "] = " << V[i] << std::endl;
         }	
 
-//	do {std::cout << "Press Enter to Continue" << std::endl;}
-//	while(std::cin.get() != '\n');
 	// file creation for V and I here
         CreateFile(V, I, details);
+        replot(V);
         system("sleep 0.01");
-	// gnuplot call here
-	//plot(V);
+        // gnuplot call here
+        //plot(V);
     }
-    std::cout << "count: " << count << std::endl;
-    for (int i = 0; i < details.nx; i++){
-	std::cout << "V[" << i << "] = " << V[i] << std::endl;
-    }
-    }
-	// kill child process here from parent process
-    /*
-     *if(pid > 0){ std::cout << pid << std::endl;
-	    kill(getpid(), SIGKILL);
-    }
-    if(pid == 0){
-            std::cout << "passed" << getpid() << std::endl;
-	    kill(getpid(), SIGKILL); 
-    }
-     * */
+        for (int i = 0; i < details.nx; i++){
+           // std::cout << "V[" << i << "] = " << V[i] << std::endl;
+        }
+    } // pid > 0 end case
+    
     if(pid > 0) {
-	std::cout << pid << std::endl;
-//	std::string cmdx = "kill " + std::to_string(pid + 2);
-//	system(cmdx.c_str());
-       // killpg(pid, SIGKILL);
-       //system("kill gnuplot");
-       //int G = kill(pid + 2, SIGTERM);
-       //std::cout << "G is " << G << std::endl;
-	int K = NewPID();
-	if(K > 0){
-		std::cout << "killerPID is: " << K << std::endl;
-		std::string cmd = "kill " + std::to_string(K);
-		system(cmd.c_str());
-	}
-	
+        std::cout << pid << std::endl;
+        
+        int K = NewPID();
+        if(K > 0){
+            std::cout << "killerPID is: " << K << std::endl;
+            std::string cmd = "kill " + std::to_string(K);
+            system(cmd.c_str());
+        }
     }
     if(pid == 0){
         std::cout << "child process x: " << getpid() << std::endl;
-	   // system("kill 2");
-	
     }
     std::cout << "who done it: " << getpid() << std::endl;
     return 0; 
@@ -191,9 +154,10 @@ double Vgourd(int n, double dt){
     else if(t >= t_rise + t_peak && t <= t_rise + t_peak + t_fall)
     	{ Vsauce = 2*(t_rise + t_peak + t_fall - t) / t_fall;}
     else {Vsauce = 0;}
-    std::cout << "Vsauce at n:" << n << " = " << Vsauce << std::endl;
+    //std::cout << "Vsauce at n:" << n << " = " << Vsauce << std::endl;
     return Vsauce;
 }
+
 
 void Vlupdate(double V[],double I[], details_t& details, coeff_t& coeff){
     // voltage at load node
@@ -201,11 +165,13 @@ void Vlupdate(double V[],double I[], details_t& details, coeff_t& coeff){
 
 }
 
+
 void iupdate(double I[], double V[], details_t& details, coeff_t& coeff){
     for(int k = 0; k < details.nx - 1; k++){
 	I[k] = I[k] - coeff.ci * (V[k+1] - V[k]);
     }
 }
+
 
 void init_parameters(details_t& details){
 // Initialize variable
@@ -234,6 +200,7 @@ void init_parameters(details_t& details){
 	
 }
 
+
 void init_coeff(coeff_t& coeff, details_t& details){
     // if load_case = 1
     coeff.cv = details.dt/(details.C*details.dx);
@@ -244,10 +211,12 @@ void init_coeff(coeff_t& coeff, details_t& details){
     coeff.c2 = b1 - b2;
 }
 
+
 void CreateFile(double V[], double I[], details_t& details){
     std::ofstream out1, out2;
     out1.open("V2.txt", std::ofstream::out | std::ofstream::trunc);
     out2.open("I2.txt", std::ofstream::out | std::ofstream::trunc);
+
 
     for(int k = 0; k < details.nx; k++){
    	out1 << k+1 << "\t" << V[k] << "\n";
@@ -267,20 +236,16 @@ void CreateFile(double V[], double I[], details_t& details){
     
 }
 
+
 void plot(double P[]){
- //   system("gnuplot -p -e \"plot 'V.txt'\"");
 	std::ifstream f;
 	f.open("file");
 	std::string cmd;
 	std::getline(f, cmd);
 	std::cout << "in my file: " << cmd << std::endl; 
-       // execlp("./file", NULL);	
-        system(cmd.c_str());
-
-   // system("gnuplot -p -e \"set style data linepoints\"\"plot 'V.txt'\""); 
-   // gnuplot -p -e "plot 'V.txt'" -e "set style data linepoints"
-   
+    system(cmd.c_str());
 }
+
 
 std::string exec(const char* cmd){
 	std::array<char, 128> buffer;
@@ -293,9 +258,10 @@ std::string exec(const char* cmd){
 	return result;
 }
 
+
 int NewPID(){
 	std::string read = exec("ps aux");
-	std::cout << read << std::endl;
+//	std::cout << read << std::endl;
 
 	std::stringstream check1(read);
 	std::string tmp;
@@ -310,9 +276,9 @@ int NewPID(){
 		     std::back_inserter(tokens));
 		
 		for(int i = 0; i < tokens.size(); i++){
-			std::cout << i << tokens[i] << std::endl;
+//			std::cout << i << tokens[i] << std::endl;
 			if(tokens[i] == "gnuplot"){
-				std::cout << "Winner: " << tokens[1] << std::endl;
+//				std::cout << "Winner: " << tokens[1] << std::endl;
 				int T = std::stoi(tokens[1]);
 				std::cout << "Token 1 as int is: " << T << std::endl;
 				return T;
@@ -321,4 +287,22 @@ int NewPID(){
 		tokens.clear();
 	}
 	return 0;
+}
+
+void plot2(double P[]){
+	std::ifstream f;
+	f.open("load.file");
+	std::string cmd;
+	std::getline(f, cmd);
+	std::cout << "in my file: " << cmd << std::endl; 
+    system(cmd.c_str());
+}
+
+void replot(double P[]){
+	std::ifstream f;
+	f.open("load2.file");
+	std::string cmd;
+	std::getline(f, cmd);
+	std::cout << "in my file: " << cmd << std::endl; 
+    system(cmd.c_str());
 }
