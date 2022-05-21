@@ -1,2 +1,0 @@
-set style data linespoints
-plot 'V.txt'

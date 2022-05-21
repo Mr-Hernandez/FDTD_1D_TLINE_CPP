@@ -1,1 +1,0 @@
-gnuplot -p -e "plot '<cat V.txt'; set style data linespoints; set yrange [-2:2]" loop.plt &
