@@ -10,4 +10,4 @@ run:
 	./OneD.out
 
 clean:
-	rm OneD.out
+	rm *.out
