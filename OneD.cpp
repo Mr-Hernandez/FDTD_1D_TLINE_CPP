@@ -2,17 +2,6 @@
 #include <math.h>
 #include <fstream>
 #include <unistd.h>
-//#include <signal.h>
-
-// for exec() and NewPID()
-#include <memory>
-#include <stdexcept>
-#include <string.h>
-#include <array>
-#include <vector>
-#include <sstream>
-#include <algorithm>
-#include <iterator>
 
 //for new replot method
 #include <sys/types.h>
@@ -20,9 +9,6 @@
 #include <stdlib.h>
 #include <sys/wait.h>
 
-/*
- * Try using refresh and replot  and volatile instead of reread.
- */
 
 
 typedef struct{ 
@@ -63,11 +49,6 @@ void init_parameters(details_t& details);
 void init_coeff(coeff_t& coeff, details_t& details);
 void iupdate(double I[], double V[], details_t& details, coeff_t& coeff);
 void CreateFile(double V[], double I[], details_t& details);
-void plot(double P[]);
-std::string exec(const char* cmd);
-int NewPID();
-void plot2(double P[]);
-void replot(double P[]);
 
 
 int main(){
@@ -80,33 +61,38 @@ int main(){
     double V[details.nx] = {0};
     double I[details.nx-1] = {0};
     CreateFile(V, I, details);
-    // additions
+
     int pipefd[2];
     pid_t pid;
     char buf;
-    //char msg = 'O';
-    char msg[]{"O"};
+    char msg = 'O';
     pipe(pipefd);
     pid = fork();
     
-
-    if(pid == 0){ 
+    // Child process runs uses popen() to run gnuplot and plot and replot
+    // from the data file it calls. This process is triggered by parent process
+    // sending signal at appropriate times to avoid reading errors when reading
+    // from the data file.
+    // Parent process makes calculations and sends a signal to child process
+    // indicating child should run replot.
+    if(pid == 0){ // child process 
         close(pipefd[1]);
         FILE* gnuPipe = popen("gnuplot -persist", "w");
-        fflush(gnuPipe);
+        fflush(gnuPipe); // flush in order to execute the commands in the pipe.
         fprintf(gnuPipe, "plot 'V.txt'\n");
+        fprintf(gnuPipe, "set style data linespoints\n");
+        fprintf(gnuPipe, "set yrange [-2:2]\n");
+        fprintf(gnuPipe, "set title \"Plot over time\"\n");
         fflush(gnuPipe);
-        while (read(pipefd[0], &buf, 1) > 0){
+        /*while (read(pipefd[0], &buf, 1) > 0){
                if(buf == 'G'){break;}
-        }
+        }*/
         while (read(pipefd[0], &buf, 1) > 0) // read while EOF
         {     
            if(buf == 'D'){
-               std::cout << "Got D" << std::endl;
+               //std::cout << "Got D" << std::endl;
            }else if(buf == 'E'){
-               std::cout << "Got E" << std::endl;
-               fprintf(gnuPipe, "set yrange [-2:2]\n");
-               fprintf(gnuPipe, "set title \"Cave of Wonder\"\n");
+               //std::cout << "Got E" << std::endl;
                fprintf(gnuPipe, "replot\n");
                fflush(gnuPipe);
            }else if(buf == 'X'){
@@ -119,78 +105,39 @@ int main(){
 		}
            
 	   std::cout << "Closing cuz X" << std::endl; 
-           //write(1, "\n", 1);
-           close(pipefd[0]); // close the read-end of the pipe
-           exit(EXIT_SUCCESS);
+       close(pipefd[0]); // close the read-end of the pipe
+       exit(EXIT_SUCCESS);
     }
-    else{
-	    std::cout << "parent id: " << pid << std::endl;
-        std::cout << "parent get: " << getpid() << std::endl; 
+    else{ // parent process
         close(pipefd[0]); // close the read-end of the pipe, I'm not going to use it
-       std::cout << "enter G:"; std::cin >> msg;
-	   write(pipefd[1], &msg, strlen(msg)); // send the content of argv[1] to the reader
-	   char INPUT[] = "DE";
-       msg[0] = 'E';
+        //std::cout << "enter G:"; std::cin >> msg;
+	    //write(pipefd[1], &msg, sizeof(msg)); // send the content of argv[1] to the reader
+       msg = 'E';
        for (int i = 0; i < details.nt-1; i++){
             Vupdate(V, I, details, coeff);
             VsUpdate(V, I, i, details, coeff);
             Vlupdate(V, I, details, coeff);
             iupdate(I, V, details, coeff);
-            //std::cout << "At i = " << i << std::endl;
-        // file creation for V and I here
             CreateFile(V, I, details);
-            //msg = 'E';
-		    write(pipefd[1], &msg, strlen(msg)); // send the content of argv[1] to the reader
-            /*if(i != 88){
-		    write(pipefd[1], &msg, strlen(&msg)); // send the content of argv[1] to the reader
-            }else{
-                i = 89;
-		        write(pipefd[1], &msg, strlen(&msg)); // send the content of argv[1] to the reader
-                i = 88;
-            }*/
-
+		    write(pipefd[1], &msg, sizeof(msg)); // send the content of argv[1] to the reader
             system("sleep 0.01");
         } 
-       //size_t BB = strlen(&msg);
-       //std::cout << BB << " is BB" << std::endl;
-	   std::cout << "enter to end:"; std::cin >> msg;
-       std::cout << "clsing pipefd[1] now" << std::endl;
+	   //std::cout << "enter to end:"; std::cin >> msg;
+       //std::cout << "clsing pipefd[1] now" << std::endl;
 	   close(pipefd[1]); // close the write-end of the pipe, thus sending EOF to the reader
            wait(NULL); // wait for the child process to exit before I do the same
            exit(EXIT_SUCCESS);
        }
     return 0;
 }
-/*
-// old
-    
-        for (int i = 0; i < details.nx; i++){
-           // std::cout << "V[" << i << "] = " << V[i] << std::endl;
-        }
-    } // pid > 0 end case
-    
-    if(pid > 0) {
-        std::cout << pid << std::endl;
-        
-        int K = NewPID();
-        if(K > 0){
-            std::cout << "killerPID is: " << K << std::endl;
-            std::string cmd = "kill " + std::to_string(K);
-            system(cmd.c_str());
-        }
-    }
-    if(pid == 0){
-        std::cout << "child process x: " << getpid() << std::endl;
-    }
-    std::cout << "who done it: " << getpid() << std::endl;
-    return 0; 
-}*/
+
 
 void Vupdate(double V[], double I[], details_t& details, coeff_t& coeff){
     for(int k = 1; k < details.nx-1; k++){
 	V[k] = V[k] - coeff.cv * (I[k] - I[k-1]);
     }
 }
+
 
 void VsUpdate(double V[], double I[], int n, details_t& details, coeff_t& coeff){
     double Vs = Vgourd(n, details.dt);
@@ -200,6 +147,7 @@ void VsUpdate(double V[], double I[], int n, details_t& details, coeff_t& coeff)
 	    V[0] = Vs; // if Rs = 0, then V[0] = Vs
     }
 }
+
 
 double Vgourd(int n, double dt){
     double t_rise = 200*pow(10,-12);
@@ -292,75 +240,4 @@ void CreateFile(double V[], double I[], details_t& details){
     out1.close();
     out2.close();
 
-}
-
-
-void plot(double P[]){
-	std::ifstream f;
-	f.open("file");
-	std::string cmd;
-	std::getline(f, cmd);
-	std::cout << "in my file: " << cmd << std::endl; 
-    system(cmd.c_str());
-}
-
-
-std::string exec(const char* cmd){
-	std::array<char, 128> buffer;
-	std::string result;
-	std::shared_ptr<FILE> pipe(popen(cmd, "r"), pclose);
-	while(!feof(pipe.get())){
-		if(fgets(buffer.data(), 128, pipe.get()) != nullptr)
-			result += buffer.data();
-	}
-	return result;
-}
-
-
-int NewPID(){
-	std::string read = exec("ps aux");
-//	std::cout << read << std::endl;
-
-	std::stringstream check1(read);
-	std::string tmp;
-	std::vector <std::string> tokens;
-	
-	while(getline(check1,tmp, '\n'))
-	{
-		std::stringstream check2(tmp);
-		std::string tmp2;
-		copy(std::istream_iterator<std::string>(check2),
-		     std::istream_iterator<std::string>(),
-		     std::back_inserter(tokens));
-		
-		for(int i = 0; i < tokens.size(); i++){
-//			std::cout << i << tokens[i] << std::endl;
-			if(tokens[i] == "gnuplot"){
-//				std::cout << "Winner: " << tokens[1] << std::endl;
-				int T = std::stoi(tokens[1]);
-				std::cout << "Token 1 as int is: " << T << std::endl;
-				return T;
-			}
-		}
-		tokens.clear();
-	}
-	return 0;
-}
-
-void plot2(double P[]){
-	std::ifstream f;
-	f.open("load.file");
-	std::string cmd;
-	std::getline(f, cmd);
-	std::cout << "in my file: " << cmd << std::endl; 
-    system(cmd.c_str());
-}
-
-void replot(double P[]){
-	std::ifstream f;
-	f.open("load2.file");
-	std::string cmd;
-	std::getline(f, cmd);
-	std::cout << "in my file: " << cmd << std::endl; 
-    system(cmd.c_str());
 }
