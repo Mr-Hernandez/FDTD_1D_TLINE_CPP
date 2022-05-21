@@ -2,41 +2,14 @@
 #include <math.h>
 #include <fstream>
 #include <unistd.h>
-#include <sys/wait.h>
+
+//for new replot method
 #include <sys/types.h>
-#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/wait.h>
 
-// for exec() and NewPID()
-#include <memory>
-#include <stdexcept>
-#include <string>
-#include <array>
-#include <vector>
-#include <sstream>
-#include <algorithm>
-#include <iterator>
 
-/*
- *
- *
- * What's Next?
- * 1. calls to gnuplot updating each iterations
- * 2. Either output file of V and I or feed directly to gnuplot call
- * 3. Consider single file creation vs multi file creation
- *   a. can gnuplot take only part of a file?
- *   stackoverflow.com/questions/36926994/how-to-plot-specific-subset-of-data-from-a-data-file-with-gnuplot 
- * 4. Make list of commands, perhaps create a header for gnuplot use
- * 5. 
- * 
- * issues to fix
- * 1. output file is appending rather than clearing and rewriting
- * 2. will gnuplot keep resizing as V and I change? 
- * Next
- * 1. automate child pid retrieval to kill process
- * 2. set auto timer for the for loop
- * 3. fix equations
- * 4. possibly make gif. 5. Consider this
- *		 */
 
 typedef struct{ 
     double C;
@@ -76,9 +49,7 @@ void init_parameters(details_t& details);
 void init_coeff(coeff_t& coeff, details_t& details);
 void iupdate(double I[], double V[], details_t& details, coeff_t& coeff);
 void CreateFile(double V[], double I[], details_t& details);
-void plot(double P[]);
-std::string exec(const char* cmd);
-int NewPID();
+
 
 int main(){
     details_t details;
@@ -89,82 +60,84 @@ int main(){
 
     double V[details.nx] = {0};
     double I[details.nx-1] = {0};
-    pid_t pid = fork();
-    if(pid == 0){ 
-	    plot(V);
-	    std::cout << "child id: " <<  pid << std::endl;
-       	    std::cout << "child get: " << getpid() << std::endl; 
-    }
-    else if(pid > 0){
-	    std::cout << "parent id: " << pid << std::endl;
-            std::cout << "parent get: " << getpid() << std::endl; 
-    //plot(V); 
+    CreateFile(V, I, details);
 
-    int count = 0;
-    for (int i = 0; i < details.nt-1; i++){
-	// do stuff here
-	count++;
-	Vupdate(V, I, details, coeff);
-	VsUpdate(V, I, i, details, coeff);
-	Vlupdate(V, I, details, coeff);
-	iupdate(I, V, details, coeff);
-        for (int i = 0; i < details.nx; i++){
-		std::cout << "V[" << i << "] = " << V[i] << std::endl;
-        }	
-
-//	do {std::cout << "Press Enter to Continue" << std::endl;}
-//	while(std::cin.get() != '\n');
-	// file creation for V and I here
-        CreateFile(V, I, details);
-        system("sleep 0.01");
-	// gnuplot call here
-	//plot(V);
+    int pipefd[2];
+    pid_t pid;
+    char buf;
+    char msg = 'O';
+    pipe(pipefd);
+    pid = fork();
+    
+    // Child process runs uses popen() to run gnuplot and plot and replot
+    // from the data file it calls. This process is triggered by parent process
+    // sending signal at appropriate times to avoid reading errors when reading
+    // from the data file.
+    // Parent process makes calculations and sends a signal to child process
+    // indicating child should run replot.
+    if(pid == 0){ // child process 
+        close(pipefd[1]);
+        FILE* gnuPipe = popen("gnuplot -persist", "w");
+        fflush(gnuPipe); // flush in order to execute the commands in the pipe.
+        fprintf(gnuPipe, "plot 'V.txt'\n");
+        fprintf(gnuPipe, "set style data linespoints\n");
+        fprintf(gnuPipe, "set yrange [-2:2]\n");
+        fprintf(gnuPipe, "set title \"Plot over time\"\n");
+        fflush(gnuPipe);
+        /*while (read(pipefd[0], &buf, 1) > 0){
+               if(buf == 'G'){break;}
+        }*/
+        while (read(pipefd[0], &buf, 1) > 0) // read while EOF
+        {     
+           if(buf == 'D'){
+               //std::cout << "Got D" << std::endl;
+           }else if(buf == 'E'){
+               //std::cout << "Got E" << std::endl;
+               fprintf(gnuPipe, "replot\n");
+               fflush(gnuPipe);
+           }else if(buf == 'X'){
+               std::cout << "Got X" << std::endl;
+               break;
+           }else{
+               std::cout << "garbage: " << buf << std::endl;
+           }
+           
+		}
+           
+	   std::cout << "Closing cuz X" << std::endl; 
+       close(pipefd[0]); // close the read-end of the pipe
+       exit(EXIT_SUCCESS);
     }
-    std::cout << "count: " << count << std::endl;
-    for (int i = 0; i < details.nx; i++){
-	std::cout << "V[" << i << "] = " << V[i] << std::endl;
-    }
-    }
-	// kill child process here from parent process
-    /*
-     *if(pid > 0){ std::cout << pid << std::endl;
-	    kill(getpid(), SIGKILL);
-    }
-    if(pid == 0){
-            std::cout << "passed" << getpid() << std::endl;
-	    kill(getpid(), SIGKILL); 
-    }
-     * */
-    if(pid > 0) {
-	std::cout << pid << std::endl;
-//	std::string cmdx = "kill " + std::to_string(pid + 2);
-//	system(cmdx.c_str());
-       // killpg(pid, SIGKILL);
-       //system("kill gnuplot");
-       //int G = kill(pid + 2, SIGTERM);
-       //std::cout << "G is " << G << std::endl;
-	int K = NewPID();
-	if(K > 0){
-		std::cout << "killerPID is: " << K << std::endl;
-		std::string cmd = "kill " + std::to_string(K);
-		system(cmd.c_str());
-	}
-	
-    }
-    if(pid == 0){
-        std::cout << "child process x: " << getpid() << std::endl;
-	   // system("kill 2");
-	
-    }
-    std::cout << "who done it: " << getpid() << std::endl;
-    return 0; 
+    else{ // parent process
+        close(pipefd[0]); // close the read-end of the pipe, I'm not going to use it
+        //std::cout << "enter G:"; std::cin >> msg;
+	    //write(pipefd[1], &msg, sizeof(msg)); // send the content of argv[1] to the reader
+       msg = 'E';
+       for (int i = 0; i < details.nt-1; i++){
+            Vupdate(V, I, details, coeff);
+            VsUpdate(V, I, i, details, coeff);
+            Vlupdate(V, I, details, coeff);
+            iupdate(I, V, details, coeff);
+            CreateFile(V, I, details);
+		    write(pipefd[1], &msg, sizeof(msg)); // send the content of argv[1] to the reader
+            system("sleep 0.01");
+        } 
+	   //std::cout << "enter to end:"; std::cin >> msg;
+       //std::cout << "clsing pipefd[1] now" << std::endl;
+	   close(pipefd[1]); // close the write-end of the pipe, thus sending EOF to the reader
+           wait(NULL); // wait for the child process to exit before I do the same
+           exit(EXIT_SUCCESS);
+       }
+    return 0;
 }
+
 
 void Vupdate(double V[], double I[], details_t& details, coeff_t& coeff){
     for(int k = 1; k < details.nx-1; k++){
 	V[k] = V[k] - coeff.cv * (I[k] - I[k-1]);
     }
 }
+
 
 void VsUpdate(double V[], double I[], int n, details_t& details, coeff_t& coeff){
     double Vs = Vgourd(n, details.dt);
@@ -174,6 +147,7 @@ void VsUpdate(double V[], double I[], int n, details_t& details, coeff_t& coeff)
 	    V[0] = Vs; // if Rs = 0, then V[0] = Vs
     }
 }
+
 
 double Vgourd(int n, double dt){
     double t_rise = 200*pow(10,-12);
@@ -191,9 +165,10 @@ double Vgourd(int n, double dt){
     else if(t >= t_rise + t_peak && t <= t_rise + t_peak + t_fall)
     	{ Vsauce = 2*(t_rise + t_peak + t_fall - t) / t_fall;}
     else {Vsauce = 0;}
-    std::cout << "Vsauce at n:" << n << " = " << Vsauce << std::endl;
+    //std::cout << "Vsauce at n:" << n << " = " << Vsauce << std::endl;
     return Vsauce;
 }
+
 
 void Vlupdate(double V[],double I[], details_t& details, coeff_t& coeff){
     // voltage at load node
@@ -201,11 +176,13 @@ void Vlupdate(double V[],double I[], details_t& details, coeff_t& coeff){
 
 }
 
+
 void iupdate(double I[], double V[], details_t& details, coeff_t& coeff){
     for(int k = 0; k < details.nx - 1; k++){
 	I[k] = I[k] - coeff.ci * (V[k+1] - V[k]);
     }
 }
+
 
 void init_parameters(details_t& details){
 // Initialize variable
@@ -234,6 +211,7 @@ void init_parameters(details_t& details){
 	
 }
 
+
 void init_coeff(coeff_t& coeff, details_t& details){
     // if load_case = 1
     coeff.cv = details.dt/(details.C*details.dx);
@@ -244,10 +222,12 @@ void init_coeff(coeff_t& coeff, details_t& details){
     coeff.c2 = b1 - b2;
 }
 
+
 void CreateFile(double V[], double I[], details_t& details){
     std::ofstream out1, out2;
-    out1.open("V2.txt", std::ofstream::out | std::ofstream::trunc);
-    out2.open("I2.txt", std::ofstream::out | std::ofstream::trunc);
+    out1.open("V.txt", std::ofstream::out | std::ofstream::trunc);
+    out2.open("I.txt", std::ofstream::out | std::ofstream::trunc);
+
 
     for(int k = 0; k < details.nx; k++){
    	out1 << k+1 << "\t" << V[k] << "\n";
@@ -260,65 +240,4 @@ void CreateFile(double V[], double I[], details_t& details){
     out1.close();
     out2.close();
 
-    remove("V.txt");
-    remove("I.txt");
-    rename("V2.txt", "V.txt");
-    rename("I2.txt", "I.txt");
-    
-}
-
-void plot(double P[]){
- //   system("gnuplot -p -e \"plot 'V.txt'\"");
-	std::ifstream f;
-	f.open("file");
-	std::string cmd;
-	std::getline(f, cmd);
-	std::cout << "in my file: " << cmd << std::endl; 
-       // execlp("./file", NULL);	
-        system(cmd.c_str());
-
-   // system("gnuplot -p -e \"set style data linepoints\"\"plot 'V.txt'\""); 
-   // gnuplot -p -e "plot 'V.txt'" -e "set style data linepoints"
-   
-}
-
-std::string exec(const char* cmd){
-	std::array<char, 128> buffer;
-	std::string result;
-	std::shared_ptr<FILE> pipe(popen(cmd, "r"), pclose);
-	while(!feof(pipe.get())){
-		if(fgets(buffer.data(), 128, pipe.get()) != nullptr)
-			result += buffer.data();
-	}
-	return result;
-}
-
-int NewPID(){
-	std::string read = exec("ps aux");
-	std::cout << read << std::endl;
-
-	std::stringstream check1(read);
-	std::string tmp;
-	std::vector <std::string> tokens;
-	
-	while(getline(check1,tmp, '\n'))
-	{
-		std::stringstream check2(tmp);
-		std::string tmp2;
-		copy(std::istream_iterator<std::string>(check2),
-		     std::istream_iterator<std::string>(),
-		     std::back_inserter(tokens));
-		
-		for(int i = 0; i < tokens.size(); i++){
-			std::cout << i << tokens[i] << std::endl;
-			if(tokens[i] == "gnuplot"){
-				std::cout << "Winner: " << tokens[1] << std::endl;
-				int T = std::stoi(tokens[1]);
-				std::cout << "Token 1 as int is: " << T << std::endl;
-				return T;
-			}
-		}
-		tokens.clear();
-	}
-	return 0;
 }
